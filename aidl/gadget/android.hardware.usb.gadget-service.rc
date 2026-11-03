@@ -3,6 +3,7 @@ service vendor.usb-gadget-hal /vendor/bin/hw/android.hardware.usb.gadget-service
     user system
     group system shell mtp
     disabled
+    interface aidl android.hardware.usb.gadget.IUsbGadget/default
 
 on property:sys.usb.configfs=2
     enable vendor.usb-gadget-hal
