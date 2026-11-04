@@ -11,4 +11,5 @@ service vendor.thermal-hal /vendor/bin/hw/android.hardware.thermal-service.media
     user system
     group system
     priority -10
+    interface aidl android.hardware.thermal.IThermal/default
     disabled
