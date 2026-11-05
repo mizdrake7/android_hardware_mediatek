@@ -1060,7 +1060,15 @@ void ThermalHelperImpl::initializeTrip(const std::unordered_map<std::string, std
 
         bool trip_update = false;
         std::string_view sensor_name = sensor_info.first;
-        std::string_view tz_path = path_map.at(sensor_name.data());
+        const std::string &zone_name = sensor_info.second.zone_name.empty()
+                                           ? sensor_info.first
+                                           : sensor_info.second.zone_name;
+        if (!path_map.contains(zone_name)) {
+            LOG(WARNING) << "Sensor " << sensor_name << " (zone: " << zone_name
+                         << ") not found in sysfs path_map, skipping trip init";
+            continue;
+        }
+        std::string_view tz_path = path_map.at(zone_name);
         std::string tz_policy;
         std::string path =
                 ::android::base::StringPrintf("%s/%s", (tz_path.data()), kSensorPolicyFile.data());
