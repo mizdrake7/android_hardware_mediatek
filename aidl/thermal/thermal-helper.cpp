@@ -74,8 +74,10 @@ std::unordered_map<std::string, std::string> parseThermalPathMap(std::string_vie
             continue;
         }
 
+        std::string trimmed_name = ::android::base::Trim(name);
+        LOG(INFO) << "Discovered thermal " << prefix << " [" << dp->d_name << "]: " << trimmed_name;
         path_map.emplace(
-                ::android::base::Trim(name),
+                trimmed_name,
                 ::android::base::StringPrintf("%s/%s", kThermalSensorsRoot.data(), dp->d_name));
     }
 
@@ -403,7 +405,8 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
             return;
         }
     } else if (!ret) {
-        LOG(FATAL) << "ThermalHAL could not be initialized properly.";
+        LOG(ERROR) << "ThermalHAL initialization had errors, continuing in degraded mode.";
+        ret = true;
     }
     is_initialized_ = ret;
 
@@ -422,7 +425,7 @@ ThermalHelperImpl::ThermalHelperImpl(const NotificationCallback &cb)
     // Need start watching after status map initialized
     is_initialized_ = thermal_watcher_->startWatchingDeviceFiles();
     if (!is_initialized_) {
-        LOG(FATAL) << "ThermalHAL could not start watching thread properly.";
+        LOG(WARNING) << "ThermalHAL could not start watching thread properly, continuing without watcher.";
     }
 }
 
@@ -817,9 +820,11 @@ void ThermalHelperImpl::clearAllThrottling(void) {
 
 bool ThermalHelperImpl::initializeSensorMap(
         const std::unordered_map<std::string, std::string> &path_map) {
-    for (const auto &sensor_info_pair : sensor_info_map_) {
+    for (auto it = sensor_info_map_.begin(); it != sensor_info_map_.end(); ) {
+        const auto &sensor_info_pair = *it;
         std::string_view sensor_name = sensor_info_pair.first;
         if (sensor_info_pair.second.virtual_sensor_info != nullptr) {
+            ++it;
             continue;
         }
 
@@ -828,8 +833,10 @@ bool ThermalHelperImpl::initializeSensorMap(
         // If of SYSFS path type, ensure the sensor name is in the path map.
         if (path_type == TempPathType::SYSFS) {
             if (!path_map.contains(sensor_info_pair.second.zone_name.data())) {
-                LOG(ERROR) << "Could not find " << sensor_info_pair.second.zone_name << " in sysfs";
-                return false;
+                LOG(WARNING) << "Could not find " << sensor_info_pair.second.zone_name
+                             << " in sysfs, skipping sensor: " << sensor_name;
+                it = sensor_info_map_.erase(it);
+                continue;
             }
 
             if (path.empty()) {
@@ -838,14 +845,17 @@ bool ThermalHelperImpl::initializeSensorMap(
             }
         } else if (path_type == TempPathType::DEVICE_PROPERTY) {
             if (path.empty()) {
-                LOG(ERROR) << "Empty device property path for sensor: " << sensor_name;
-                return false;
+                LOG(WARNING) << "Empty device property path for sensor: " << sensor_name << ", skipping";
+                it = sensor_info_map_.erase(it);
+                continue;
             }
         }
         if (!thermal_sensors_.addThermalFile(sensor_name, path, path_type)) {
-            LOG(ERROR) << "Could not add " << sensor_name << "to sensors map";
-            return false;
+            LOG(WARNING) << "Could not add " << sensor_name << " to sensors map, skipping";
+            it = sensor_info_map_.erase(it);
+            continue;
         }
+        ++it;
     }
     return true;
 }
@@ -854,7 +864,7 @@ bool ThermalHelperImpl::initializeCoolingDeviceEntry(
         const std::unordered_map<std::string, std::string> &path_map, std::string_view name,
         CdevInfo &cdev_info) {
     if (!path_map.contains(name.data())) {
-        LOG(ERROR) << "Could not find " << name << " in CDEV sysfs";
+        LOG(WARNING) << "Could not find " << name << " in CDEV sysfs";
         return false;
     }
     // Add cooling device path for thermalHAL to get current state
@@ -994,14 +1004,21 @@ bool ThermalHelperImpl::initializePowercapEntry(
 bool ThermalHelperImpl::initializeThrottlingMap(
         const std::unordered_map<std::string, std::string> &cdev_map,
         const std::unordered_map<std::string, std::string> &powercap_map) {
-    for (auto &[cdev_name, cdev_info] : cooling_device_info_map_) {
+    for (auto it = cooling_device_info_map_.begin(); it != cooling_device_info_map_.end(); ) {
+        const auto &cdev_name = it->first;
+        auto &cdev_info = it->second;
         if (cdev_info.apply_powercap) {
             if (!initializePowercapEntry(powercap_map, cdev_name, cdev_info)) {
-                return false;
+                LOG(WARNING) << "Failed to initialize powercap " << cdev_name << ", skipping";
+                it = cooling_device_info_map_.erase(it);
+                continue;
             }
         } else if (!initializeCoolingDeviceEntry(cdev_map, cdev_name, cdev_info)) {
-            return false;
+            LOG(WARNING) << "Failed to initialize cooling device " << cdev_name << ", skipping";
+            it = cooling_device_info_map_.erase(it);
+            continue;
         }
+        ++it;
     }
     return true;
 }
