@@ -3,10 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+soong_namespace {
+}
+
 cc_library_shared {
     name: "libaedv",
     vendor: true,
     srcs: ["aee.c"],
+    shared_libs: ["liblog"],
 }
 
 cc_library_shared {
